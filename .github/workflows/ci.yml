@@ -67,12 +67,16 @@ jobs:
       - name: Install bazelisk
         env:
           BAZELISK_VERSION: "1.29.0"
+        # Into a user directory, not /usr/local/bin: the runner's shell is not root and
+        # curl fails there with "Failure writing output to destination".
         run: |
           set -euo pipefail
-          curl -fsSL -o /usr/local/bin/bazel \
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/bazel" \
             "https://github.com/bazelbuild/bazelisk/releases/download/v${BAZELISK_VERSION}/bazelisk-linux-amd64"
-          chmod +x /usr/local/bin/bazel
-          bazel --version
+          chmod +x "$HOME/.local/bin/bazel"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/bazel" --version
 
       # The depot is where the expensive part of this suite lives: instantiating the
       # manifests and precompiling them. It is keyed on the manifests, so a run that
