@@ -14,7 +14,13 @@ exports_files([
 # take dirname($(location ...)) as the project directory.
 filegroup(
     name = "sysimage_envs",
-    srcs = glob(["sysimage/v*/Project.toml", "sysimage/v*/Manifest.toml"]),
+    srcs = glob([
+        "sysimage/v*/Project.toml",
+        "sysimage/v*/Manifest.toml",
+    ]),
 )
 
-exports_files(glob(["sysimage/v*/Project.toml", "sysimage/v*/Manifest.toml"]))
+exports_files(glob([
+    "sysimage/v*/Project.toml",
+    "sysimage/v*/Manifest.toml",
+]))

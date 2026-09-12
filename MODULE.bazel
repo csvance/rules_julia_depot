@@ -1,6 +1,13 @@
 # rules_julia_depot: a Julia environment pinned to a committed Manifest.toml, as Bazel
 # repositories and scripts. See README.md for the contract and the consumer interface.
+#
+# compatibility_level is declared, and starts at 1, because the consumer interface here
+# is small and entirely explicit: tag names, attribute names, script arguments, and
+# environment variable names. A change to any of them breaks every consumer at once, so
+# it is worth being able to say so in the module graph. Raise it when one of those
+# changes incompatibly, not when behaviour is added.
 module(
     name = "rules_julia_depot",
     version = "0.1.0",
+    compatibility_level = 1,
 )
