@@ -1,0 +1,234 @@
+"""The end-to-end test matrix, as one macro per axis.
+
+`julia_version_tests` is everything that is true of a single Julia version, and it is
+called once per version in the matrix. `version_mismatch_test` is the one case that
+needs two, and it is called once per ordered pair.
+
+Every test is tagged `julia<minor>` for the Julia it RUNS, so CI can shard the matrix
+across runners. A cross-version test runs one Julia against the other's Manifest, which
+is a source file rather than a fetched repository, so it belongs to one shard: tagging
+it for both would make each runner instantiate both versions to test one.
+"""
+
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+# Test actions inherit nothing from the developer's shell, which is the point: these
+# resolve against the PUBLIC package server on a workstation and on a CI runner alike.
+# The matching pin for repository rules is in .bazelrc.
+_TEST_ENV = {"JULIA_PKG_SERVER": "https://pkg.julialang.org"}
+
+_HELPERS = ["common.sh"]
+
+def _tag(minor):
+    return minor.replace(".", "_")
+
+def julia_version_tests(
+        minor,
+        patch,
+        julia_repo,
+        depot_repo,
+        sysimage_depot_repo,
+        hook_depot_repo,
+        project,
+        other_minor):
+    """Declares every single-version end-to-end test for one Julia version.
+
+    Args:
+      minor: the Julia minor, e.g. "1.12". Names the targets and the tag.
+      patch: the full version the toolchain pins, e.g. "1.12.7".
+      julia_repo: the toolchain repository, e.g. "@julia_1_12".
+      depot_repo: the depot over projects/v<minor>, e.g. "@depot_1_12".
+      sysimage_depot_repo: the depot over the module's PackageCompiler environment.
+      hook_depot_repo: the depot whose fetch runs hooks/marker_hook.sh.
+      project: the project package, e.g. "//projects/v1.12".
+      other_minor: a minor that is NOT this one, for the sysimage pin check.
+    """
+    tag = _tag(minor)
+    tags = ["julia" + tag]
+
+    sh_test(
+        name = "toolchain_version_{}_test".format(tag),
+        size = "small",
+        srcs = ["toolchain_version_test.sh"],
+        args = [
+            "$(rootpath {}//:bin/julia)".format(julia_repo),
+            patch,
+        ],
+        data = _HELPERS + [
+            julia_repo + "//:bin/julia",
+            julia_repo + "//:dist",
+        ],
+        env = _TEST_ENV,
+        tags = tags,
+    )
+
+    sh_test(
+        name = "depot_stamp_{}_test".format(tag),
+        size = "small",
+        srcs = ["depot_stamp_test.sh"],
+        args = [
+            "$(rootpath {}//:env.sh)".format(depot_repo),
+            "$(rootpath {}//:stamp.txt)".format(depot_repo),
+            "$(rootpath {}:Manifest.toml)".format(project),
+            patch,
+        ],
+        data = _HELPERS + [
+            depot_repo + "//:env.sh",
+            depot_repo + "//:stamp.txt",
+            project + ":Manifest.toml",
+        ],
+        env = _TEST_ENV,
+        tags = tags,
+    )
+
+    sh_test(
+        name = "hook_{}_test".format(tag),
+        size = "small",
+        srcs = ["hook_test.sh"],
+        args = [
+            "$(rootpath {}//:stamp.txt)".format(hook_depot_repo),
+            "$(rootpath {}//:env.sh)".format(hook_depot_repo),
+            "rules-julia-depot-e2e-hook",
+        ],
+        data = _HELPERS + [
+            hook_depot_repo + "//:env.sh",
+            hook_depot_repo + "//:stamp.txt",
+        ],
+        env = _TEST_ENV,
+        tags = tags,
+    )
+
+    sh_test(
+        name = "image_depot_modes_{}_test".format(tag),
+        size = "large",
+        srcs = ["image_depot_modes_test.sh"],
+        args = [
+            "$(rootpath @rules_julia_depot//julia:image_depot.sh)",
+            "$(rootpath {}//:bin/julia)".format(julia_repo),
+            "$(rootpath {}:Manifest.toml)".format(project),
+            "$(rootpath {}//:stamp.txt)".format(depot_repo),
+        ],
+        data = _HELPERS + [
+            "@rules_julia_depot//julia:image_depot.sh",
+            depot_repo + "//:stamp.txt",
+            julia_repo + "//:bin/julia",
+            julia_repo + "//:dist",
+            project + ":Manifest.toml",
+            project + ":Project.toml",
+        ],
+        env = _TEST_ENV,
+        tags = tags + ["requires-network"],
+    )
+
+    sh_test(
+        name = "image_depot_overrides_{}_test".format(tag),
+        size = "large",
+        srcs = ["image_depot_overrides_test.sh"],
+        args = [
+            "$(rootpath @rules_julia_depot//julia:image_depot.sh)",
+            "$(rootpath @rules_julia_depot//julia:artifact_paths.jl)",
+            "$(rootpath {}//:bin/julia)".format(julia_repo),
+            "$(rootpath {}:Manifest.toml)".format(project),
+            "$(rootpath {}//:stamp.txt)".format(depot_repo),
+        ],
+        data = _HELPERS + [
+            "@rules_julia_depot//julia:artifact_paths.jl",
+            "@rules_julia_depot//julia:image_depot.sh",
+            depot_repo + "//:stamp.txt",
+            julia_repo + "//:bin/julia",
+            julia_repo + "//:dist",
+            project + ":Manifest.toml",
+            project + ":Project.toml",
+        ],
+        env = _TEST_ENV,
+        tags = tags + ["requires-network"],
+    )
+
+    # Minutes, not seconds: PackageCompiler rebuilds the whole system image.
+    sh_test(
+        name = "sysimage_auto_{}_test".format(tag),
+        size = "large",
+        srcs = ["sysimage_auto_test.sh"],
+        args = [
+            "$(rootpath @rules_julia_depot//julia:sysimage.sh)",
+            "$(rootpath {}//:bin/julia)".format(julia_repo),
+            "$(rootpath {}:Manifest.toml)".format(project),
+            "$(rootpath {}//:stamp.txt)".format(depot_repo),
+            "$(rootpath {}//:stamp.txt)".format(sysimage_depot_repo),
+            minor,
+        ],
+        data = _HELPERS + [
+            "@rules_julia_depot//julia:sysimage.sh",
+            "@rules_julia_depot//julia:sysimage_envs",
+            depot_repo + "//:stamp.txt",
+            julia_repo + "//:bin/julia",
+            julia_repo + "//:dist",
+            project + ":Manifest.toml",
+            project + ":Project.toml",
+            sysimage_depot_repo + "//:stamp.txt",
+        ],
+        env = _TEST_ENV,
+        tags = tags,
+    )
+
+    sh_test(
+        name = "sysimage_wrong_minor_{}_test".format(tag),
+        size = "small",
+        srcs = ["sysimage_wrong_minor_test.sh"],
+        args = [
+            "$(rootpath @rules_julia_depot//julia:sysimage.sh)",
+            "$(rootpath {}//:bin/julia)".format(julia_repo),
+            "$(rootpath @rules_julia_depot//julia:sysimage/v{}/Manifest.toml)".format(other_minor),
+            "$(rootpath {}:Manifest.toml)".format(project),
+            other_minor,
+            minor,
+        ],
+        data = _HELPERS + [
+            "@rules_julia_depot//julia:sysimage.sh",
+            "@rules_julia_depot//julia:sysimage/v{}/Manifest.toml".format(other_minor),
+            "@rules_julia_depot//julia:sysimage_envs",
+            julia_repo + "//:bin/julia",
+            julia_repo + "//:dist",
+            project + ":Manifest.toml",
+            project + ":Project.toml",
+        ],
+        env = _TEST_ENV,
+        tags = tags,
+    )
+
+def version_mismatch_test(julia_repo, running_minor, running_patch, depot_repo, project, manifest_minor, manifest_patch):
+    """Declares the refusal test for one (running Julia, foreign Manifest) pair.
+
+    Args:
+      julia_repo: the toolchain that RUNS, e.g. "@julia_1_12".
+      running_minor: its minor, for the target name.
+      running_patch: its full version, which the error message must name.
+      depot_repo: a depot instantiated under the running Julia, used only as a read
+        cache so the test does not precompile Pkg from nothing.
+      project: the project whose Manifest is the WRONG one, e.g. "//projects/v1.13".
+      manifest_minor: that Manifest's minor, for the target name.
+      manifest_patch: that Manifest's julia_version, which the error message must name.
+    """
+    sh_test(
+        name = "version_mismatch_{}_manifest_on_{}_test".format(_tag(manifest_minor), _tag(running_minor)),
+        size = "small",
+        srcs = ["version_mismatch_test.sh"],
+        args = [
+            "$(rootpath @rules_julia_depot//julia:instantiate.sh)",
+            "$(rootpath {}//:bin/julia)".format(julia_repo),
+            "$(rootpath {}:Manifest.toml)".format(project),
+            "$(rootpath {}//:stamp.txt)".format(depot_repo),
+            manifest_patch,
+            running_patch,
+        ],
+        data = _HELPERS + [
+            "@rules_julia_depot//julia:instantiate.sh",
+            depot_repo + "//:stamp.txt",
+            julia_repo + "//:bin/julia",
+            julia_repo + "//:dist",
+            project + ":Manifest.toml",
+            project + ":Project.toml",
+        ],
+        env = _TEST_ENV,
+        tags = ["julia" + _tag(running_minor)],
+    )

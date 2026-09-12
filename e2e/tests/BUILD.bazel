@@ -1,0 +1,54 @@
+# The end-to-end suite. One call per Julia version in the matrix, plus the pairs.
+#
+# The matrix is declared in ../MODULE.bazel, which is where the repositories come from;
+# these calls only have to agree with it. See tests/defs.bzl for what each call
+# declares and the top-level README for how to add a version.
+
+load(":defs.bzl", "julia_version_tests", "version_mismatch_test")
+
+package(default_testonly = True)
+
+julia_version_tests(
+    depot_repo = "@depot_1_12",
+    hook_depot_repo = "@hook_depot_1_12",
+    julia_repo = "@julia_1_12",
+    minor = "1.12",
+    other_minor = "1.13",
+    patch = "1.12.7",
+    project = "//projects/v1.12",
+    sysimage_depot_repo = "@sysimage_depot_1_12",
+)
+
+julia_version_tests(
+    depot_repo = "@depot_1_13",
+    hook_depot_repo = "@hook_depot_1_13",
+    julia_repo = "@julia_1_13",
+    minor = "1.13",
+    other_minor = "1.12",
+    patch = "1.13.0",
+    project = "//projects/v1.13",
+    sysimage_depot_repo = "@sysimage_depot_1_13",
+)
+
+# A 1.13 manifest under 1.12, and a 1.12 manifest under 1.13. Both directions, because
+# the check compares strings and a one-sided test would pass on a check that only
+# noticed one kind of difference.
+version_mismatch_test(
+    depot_repo = "@depot_1_12",
+    julia_repo = "@julia_1_12",
+    manifest_minor = "1.13",
+    manifest_patch = "1.13.0",
+    project = "//projects/v1.13",
+    running_minor = "1.12",
+    running_patch = "1.12.7",
+)
+
+version_mismatch_test(
+    depot_repo = "@depot_1_13",
+    julia_repo = "@julia_1_13",
+    manifest_minor = "1.12",
+    manifest_patch = "1.12.7",
+    project = "//projects/v1.12",
+    running_minor = "1.13",
+    running_patch = "1.13.0",
+)

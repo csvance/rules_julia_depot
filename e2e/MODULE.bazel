@@ -1,0 +1,105 @@
+"""End-to-end tests for rules_julia_depot, over a matrix of Julia versions.
+
+This is a separate Bazel module rather than a package of the module under test, because
+what is being tested IS the consumer interface: a root module that declares
+`bazel_dep`, calls the extension, and uses the repositories it produces. A test inside
+the module would exercise the implementation and miss the seam that consumers land on.
+
+THE MATRIX lives here and nowhere else. Every Julia version in it gets four
+repositories, and tests/BUILD.bazel turns those into the same set of test cases for
+each. Adding a version means adding one block below, one `projects/v<minor>` directory
+with a Manifest resolved under that exact Julia, one `julia/sysimage/v<minor>`
+environment in the module itself, and one `julia_version_tests()` call in
+tests/BUILD.bazel. See the Testing section of the top-level README.md.
+"""
+
+module(
+    name = "rules_julia_depot_e2e",
+    version = "0.0.0",
+)
+
+bazel_dep(name = "rules_julia_depot", version = "0.1.0")
+bazel_dep(name = "rules_shell", version = "0.6.1")
+
+local_path_override(
+    module_name = "rules_julia_depot",
+    path = "..",
+)
+
+julia = use_extension("@rules_julia_depot//julia:extensions.bzl", "julia")
+
+# --- Julia 1.12 -------------------------------------------------------------------
+julia.toolchain(
+    name = "julia_1_12",
+    version = "1.12.7",
+)
+
+# The environment under test, pinned to a Manifest resolved under 1.12.7.
+julia.depot(
+    name = "depot_1_12",
+    julia = "@julia_1_12//:bin/julia",
+    manifest = "//projects/v1.12:Manifest.toml",
+)
+
+# The module's own PackageCompiler environment for this minor. `sysimage.sh auto` runs
+# julia against it, so something has to have instantiated it first, and the depot rule
+# is that something: this is also how a consumer building a sysimage arranges it.
+julia.depot(
+    name = "sysimage_depot_1_12",
+    julia = "@julia_1_12//:bin/julia",
+    manifest = "@rules_julia_depot//julia:sysimage/v1.12/Manifest.toml",
+)
+
+# The same project again, fetched through a `hook`. The hook records that it ran and
+# what it was told to read; tests/hook_test.sh checks both, and checks that it ran
+# before instantiate rather than after.
+julia.depot(
+    name = "hook_depot_1_12",
+    hook = "//hooks:marker_hook.sh",
+    hook_environ = ["E2E_HOOK_VALUE"],
+    julia = "@julia_1_12//:bin/julia",
+    manifest = "//projects/v1.12:Manifest.toml",
+)
+
+# --- Julia 1.13 -------------------------------------------------------------------
+julia.toolchain(
+    name = "julia_1_13",
+    version = "1.13.0",
+)
+
+# The environment under test. See the 1.12 block above for what each of these three is
+# for; a version added to the matrix is this block again with the numbers changed.
+julia.depot(
+    name = "depot_1_13",
+    julia = "@julia_1_13//:bin/julia",
+    manifest = "//projects/v1.13:Manifest.toml",
+)
+
+# The module's own PackageCompiler environment for this minor.
+julia.depot(
+    name = "sysimage_depot_1_13",
+    julia = "@julia_1_13//:bin/julia",
+    manifest = "@rules_julia_depot//julia:sysimage/v1.13/Manifest.toml",
+)
+
+# The same project again, fetched through a hook.
+julia.depot(
+    name = "hook_depot_1_13",
+    hook = "//hooks:marker_hook.sh",
+    hook_environ = ["E2E_HOOK_VALUE"],
+    julia = "@julia_1_13//:bin/julia",
+    manifest = "//projects/v1.13:Manifest.toml",
+)
+
+# Every repository the matrix declares, visible to //tests.
+use_repo(
+    julia,
+    "depot_1_12",
+    "depot_1_13",
+    "hook_depot_1_12",
+    "hook_depot_1_13",
+    "julia_1_12",
+    "julia_1_13",
+    "sysimage_depot_1_12",
+    "sysimage_depot_1_13",
+)
