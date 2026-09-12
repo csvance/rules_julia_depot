@@ -1,0 +1,125 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # The runner has no private network and must never be asked to look for one. The same
+  # pin is in e2e/.bazelrc for repository rules and in e2e/tests/defs.bzl for test
+  # actions; this is belt and braces for anything run outside Bazel.
+  JULIA_PKG_SERVER: https://pkg.julialang.org
+
+jobs:
+  # Cheap and unconditional: this repository is public, and the failure mode it guards
+  # against is textual rather than functional, so it runs before anything expensive.
+  public:
+    name: no private references
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: tools/check_no_private_refs.sh
+
+  buildifier:
+    name: buildifier
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install buildifier
+        env:
+          BUILDIFIER_VERSION: "8.5.1"
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/buildifier \
+            "https://github.com/bazelbuild/buildtools/releases/download/v${BUILDIFIER_VERSION}/buildifier-linux-amd64"
+          chmod +x /tmp/buildifier
+      - run: /tmp/buildifier -mode=check -lint=warn -r .
+
+  e2e:
+    name: e2e julia ${{ matrix.julia }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      # One version failing says nothing about the other, and knowing whether it is one
+      # or both is most of the diagnosis.
+      fail-fast: false
+      matrix:
+        include:
+          # `tag` is the Bazel test tag that selects this version's tests. It is derived
+          # from the version the same way tests/defs.bzl derives it, and has to stay
+          # that way: a tag that matches nothing makes a shard pass by doing nothing.
+          - julia: "1.12"
+            tag: julia1_12
+          - julia: "1.13"
+            tag: julia1_13
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bazelisk
+        env:
+          BAZELISK_VERSION: "1.29.0"
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /usr/local/bin/bazel \
+            "https://github.com/bazelbuild/bazelisk/releases/download/v${BAZELISK_VERSION}/bazelisk-linux-amd64"
+          chmod +x /usr/local/bin/bazel
+          bazel --version
+
+      # The depot is where the expensive part of this suite lives: instantiating the
+      # manifests and precompiling them. It is keyed on the manifests, so a run that
+      # changes none of them starts warm.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.julia
+          key: julia-depot-${{ matrix.julia }}-${{ hashFiles('e2e/projects/**/Manifest.toml', 'julia/sysimage/**/Manifest.toml') }}
+          restore-keys: julia-depot-${{ matrix.julia }}-
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/bazel-disk
+          key: bazel-disk-${{ matrix.julia }}-${{ hashFiles('e2e/MODULE.bazel', 'MODULE.bazel') }}
+          restore-keys: bazel-disk-${{ matrix.julia }}-
+
+      # The tag is the matrix: a test is tagged for the Julia it runs, so every test in
+      # this shard needs only this version's toolchain and depot. The cross-version
+      # refusal tests land in the shard of the Julia they run, and between the two
+      # shards both directions are covered.
+      #
+      # The shard's targets are QUERIED rather than filtered with --test_tag_filters,
+      # because a filter still analyses the tests it excludes, and analysing a test here
+      # means fetching the depot it depends on. Each runner would then instantiate both
+      # Julia versions to run one, which is most of the wall clock.
+      - name: bazel test
+        working-directory: e2e
+        run: |
+          set -euo pipefail
+          targets="$(bazel query "attr(tags, '${{ matrix.tag }}', tests(//...))")"
+          test -n "$targets" || {
+            echo "no tests tagged ${{ matrix.tag }}; the tag and the matrix disagree" >&2
+            exit 1
+          }
+          echo "$targets"
+          # shellcheck disable=SC2086
+          bazel test $targets \
+            --disk_cache="$HOME/.cache/bazel-disk" \
+            --test_output=errors \
+            --keep_going
+
+      - name: Test logs
+        if: failure()
+        working-directory: e2e
+        run: |
+          for log in $(find -L bazel-testlogs -name test.log); do
+            echo "::group::$log"
+            cat "$log"
+            echo "::endgroup::"
+          done
