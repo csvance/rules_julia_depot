@@ -22,6 +22,12 @@ and into container image layers. No registry, package server, or product is assu
   but its socket does not.
 - `//julia:artifact_paths.jl`: a measurement tool for artifact closures. Not for building.
 
+Artifact overrides come in two files: a build-time one naming a directory on the build
+host, which is what makes Pkg skip the download, and an image-time one naming the path
+inside the image, which is what ships. The image-time file is required whenever the
+build-time one is set, since shipping the build file instead would put a host path into
+an image whose artifact was deliberately not downloaded.
+
 ## Consuming
 
 ```python
@@ -96,6 +102,93 @@ julia +1.14 --project=julia/sysimage/v1.14 -e 'using Pkg; Pkg.instantiate()'
 
 Linux x86_64 is what this is used with. Other platforms work by passing `sha256` and
 `url` to `julia.toolchain`.
+
+The end-to-end suite runs against every version in its matrix, currently 1.12.7 and
+1.13.0, so "works on both" is a thing CI asserts rather than a claim.
+
+## Testing
+
+The tests live in `e2e/`, a separate Bazel module that depends on this one through
+`local_path_override`. That is deliberate: what is being tested is the consumer
+interface, so the tests consume it the way a consumer does, through `bazel_dep`, the
+extension, and the repositories it produces.
+
+```bash
+cd e2e
+bazel test //...
+```
+
+Nothing else is needed. The Julia distributions are fetched and pinned by the module
+itself, so no Julia has to be installed to run the suite. It resolves against the
+public package server, pinned in `e2e/.bazelrc`, so a shell pointing
+`JULIA_PKG_SERVER` at a private mirror does not change what the tests fetch.
+
+Expect around twenty minutes the first time, when the Julia distributions are downloaded
+and the depots instantiated, and about six for the whole matrix afterwards. The
+expensive tests are the ones that have to be: `image_depot_*` instantiates a clean depot
+per scenario, and `sysimage_auto` runs PackageCompiler.
+
+### The matrix
+
+Every Julia version in the matrix gets the same set of tests, tagged `julia<minor>` for
+the Julia they run, so a shard needs only that version's toolchain and depot:
+
+```bash
+bazel test $(bazel query "attr(tags, 'julia1_13', tests(//...))")
+```
+
+For each version: the toolchain produces a Julia of that version that can load its own
+stdlib; a depot over a Manifest resolved under it stamps the right version, manifest
+hash and depot, and its `env.sh` carries no machine path; a hook runs before instantiate
+and sees its `hook_environ`; `image_depot.sh` ships artifacts and no packages in
+`artifacts` mode and both in `full`, honours the image prefix and the artifact floor,
+and never ships depot credentials; artifact overrides are honoured, and a broken one
+fails the build instead of producing an image with two copies of a library; and
+`sysimage.sh auto` selects that version's PackageCompiler environment, builds an image,
+and that image starts and loads what was baked into it. Across versions, a Manifest
+resolved under one Julia is refused by the other in both directions, and a
+PackageCompiler environment pinned to the wrong minor is refused before any work starts.
+
+### Adding a Julia version
+
+Four steps, in this order, with 1.14 as the example. The first two need that Julia
+installed locally (juliaup is the easy way); nothing after them does.
+
+**One.** The module's PackageCompiler environment for the new minor:
+
+```bash
+mkdir -p julia/sysimage/v1.14
+cp julia/sysimage/v1.12/Project.toml julia/sysimage/v1.14/
+julia +1.14 --project=julia/sysimage/v1.14 -e 'using Pkg; Pkg.instantiate()'
+```
+
+**Two.** A test project resolved under that exact Julia, against the PUBLIC server.
+`env -u JULIA_PKG_SERVER` matters: a manifest resolved through a private mirror is not
+one this repository can publish.
+
+```bash
+mkdir -p e2e/projects/v1.14
+cp e2e/projects/v1.13/Project.toml e2e/projects/v1.14/
+cp e2e/projects/v1.13/BUILD.bazel e2e/projects/v1.14/
+env -u JULIA_PKG_SERVER julia +1.14 --project=e2e/projects/v1.14 \
+    -e 'using Pkg; Pkg.add([PackageSpec(name = "Bzip2_jll"), PackageSpec(name = "Crayons")])'
+```
+
+**Three.** The sha256 in `_KNOWN_SHA256` in `julia/extensions.bzl`, taken from
+`https://julialang-s3.julialang.org/bin/checksums/julia-1.14.<patch>.sha256`.
+
+**Four.** The declarations: four repositories in `e2e/MODULE.bazel` (toolchain, depot,
+sysimage depot, hook depot), a `julia_version_tests()` call in `e2e/tests/BUILD.bazel`,
+a `version_mismatch_test()` call for each pair worth covering, and a row in the matrix
+in `.github/workflows/ci.yml`.
+
+### Before pushing
+
+`tools/check_no_private_refs.sh` greps everything git would publish for internal
+hostnames, machine paths and credentials. The patterns are generic and live in
+`tools/private_ref_patterns.txt`; site-specific literals go in a file of your own named
+by `PRIVATE_REF_PATTERNS_EXTRA`, so that list never has to be published to be enforced.
+CI runs it, along with `buildifier -mode=check -lint=warn -r .`.
 
 ## License
 
