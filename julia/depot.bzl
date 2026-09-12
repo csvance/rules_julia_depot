@@ -9,10 +9,10 @@ as a keyed side effect rather than a declared output. Check your manifest for
 `repo-url` entries before relying on that.
 
 A REPOSITORY RULE, not a genrule, for two reasons. Fetch time is where hitting the
-network is legitimate, and repository rules key on their attributes, so
-`rctx.path(manifest)` registers the dependency and Bazel refetches when the Manifest
-changes. A build-time genrule doing the same work would need no-sandbox plus
-requires-network and would be lying to Bazel about its inputs.
+network is legitimate, and a repository rule can be made to refetch when the Manifest
+changes, which is what `_watch` below is for. A build-time genrule doing the same work
+would need no-sandbox plus requires-network and would be lying to Bazel about its
+inputs.
 
 WHAT IT PRODUCES. `env.sh`, a shell fragment consumers source before running julia,
 and `stamp.txt`, the resolved facts (manifest sha256, Julia version, host triplet,
@@ -32,9 +32,28 @@ def _env_value(rctx, name):
     # getenv registers a dependency on the variable, so a change refetches.
     return rctx.getenv(name)
 
+def _watch(rctx, path):
+    """Registers a dependency on a file, so that changing it refetches this repository.
+
+    rctx.path() resolves a label to a path and does NOTHING ELSE: it does not watch the
+    file. Registering the dependency has to be explicit, and reading the file is how it
+    is done, since watch = "auto" watches when watching that path is legal and stays
+    quiet when it is not (a label pointing into another module's directory, say).
+
+    Without this the repository stays pinned to whatever the Manifest said the first time
+    it was fetched, and a changed Manifest silently reuses a depot conformed to the old
+    one, which is the exact failure this module exists to prevent.
+
+    Args:
+      rctx: the repository context.
+      path: the path to watch, already resolved from a label.
+    """
+    rctx.read(path, watch = "auto")
+
 def _julia_depot_impl(rctx):
-    # Registers a dependency on the file: change the Manifest, Bazel refetches.
+    # The declared input. Change the Manifest, Bazel refetches: see _watch.
     manifest = rctx.path(rctx.attr.manifest)
+    _watch(rctx, manifest)
     project_dir = str(manifest.dirname)
 
     # Julia comes from a pinned repository (julia.toolchain, or any http_archive the
@@ -52,6 +71,7 @@ def _julia_depot_impl(rctx):
 
     if rctx.attr.hook != None:
         hook = rctx.path(rctx.attr.hook)
+        _watch(rctx, hook)
         res = rctx.execute([str(hook)], environment = env, timeout = 600, quiet = False)
         if res.return_code != 0:
             fail("julia_depot: hook {} failed:\n{}\n{}".format(rctx.attr.hook, res.stdout, res.stderr))
@@ -59,6 +79,7 @@ def _julia_depot_impl(rctx):
     # Materialise the depot: instantiate and precompile, failing loudly if the
     # Manifest's julia_version disagrees with this Julia.
     script = rctx.path(rctx.attr._instantiate)
+    _watch(rctx, script)
     res = rctx.execute(
         [str(script), project_dir, "stamp.txt"],
         environment = env,
