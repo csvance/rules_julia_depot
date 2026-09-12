@@ -1,0 +1,25 @@
+# Patterns that must not appear anywhere in this repository, one extended regular
+# expression per line. Blank lines and lines starting with # are ignored.
+#
+# These are deliberately GENERIC. A list of a particular organisation's hostnames would
+# publish those hostnames, which is the thing being prevented, so site-specific literals
+# belong in a file of your own named by PRIVATE_REF_PATTERNS_EXTRA instead.
+
+# Internal DNS suffixes. Covers any host under them, however it is spelled.
+[A-Za-z0-9_-]+\.(local|internal|intranet|corp|lan)\b
+
+# Absolute paths from somebody's machine. Nothing committed here needs one: a machine
+# path belongs in the generated env.sh, never in a source file.
+/home/[A-Za-z0-9]
+/cache/[A-Za-z0-9]
+/Users/[A-Za-z0-9]
+
+# Private address space, which is only ever reachable from inside a particular network.
+https?://(10|127)\.[0-9]+\.[0-9]+\.[0-9]+
+https?://192\.168\.[0-9]+\.[0-9]+
+https?://172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+
+
+# Credentials of any shape.
+BEGIN [A-Z ]*PRIVATE KEY
+[Aa]uthorization: *[Bb]earer
+(api[_-]?key|secret[_-]?key|access[_-]?token) *[:=] *["'][A-Za-z0-9]
