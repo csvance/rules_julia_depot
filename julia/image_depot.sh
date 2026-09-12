@@ -13,7 +13,8 @@
 #   JULIA_DEPOT_IMAGE_PREFIX      path of the depot inside the image, default opt/julia-depot
 #   JULIA_DEPOT_MIN_ARTIFACTS     sanity floor on artifact directories, default 1
 #   JULIA_DEPOT_OVERRIDES_BUILD   optional artifacts/Overrides.toml for the build (see below)
-#   JULIA_DEPOT_OVERRIDES_IMAGE   optional artifacts/Overrides.toml to ship in the image
+#   JULIA_DEPOT_OVERRIDES_IMAGE   the artifacts/Overrides.toml to ship in the image,
+#                                 required whenever the build one is set
 #
 # WHY A SECOND DEPOT. depot.bzl conforms the developer's ambient depot to the Manifest,
 # which is right for building fast on a workstation and wrong for an image: that tree
@@ -43,8 +44,10 @@
 # on this host and is consulted by Pkg.instantiate, which skips downloading any artifact
 # whose HASH is overridden to an existing directory (only hash-keyed overrides have that
 # effect; UUID/name overrides are honoured at load time, not at download time); the image
-# file names the in-image path and is what ships. The build fails if an overridden hash
-# was downloaded anyway, since the image would then carry both and load the registry one.
+# file names the in-image path and is what ships, and is therefore required whenever the
+# build one is set. The build fails if an overridden hash was downloaded anyway, since
+# the image would then carry both and load the registry one. Hash keys are read in either
+# TOML spelling, bare or quoted.
 set -euo pipefail
 
 proj="${1:?usage: image_depot.sh <project dir> <output tar>}"
@@ -52,6 +55,17 @@ out="${2:?usage: image_depot.sh <project dir> <output tar>}"
 
 : "${JULIA_BIN:?JULIA_BIN must be set to the pinned julia}"
 : "${JULIA_DEPOT_PATH:?JULIA_DEPOT_PATH must be set; source the depot rule env.sh first}"
+
+# The two override files are a PAIR. A build-time override with no image-time one would
+# ship the build file itself, which names a directory on this host: the image would then
+# carry neither the registry artifact (the override stopped its download) nor a valid
+# path to a replacement, and would die in the first JLL's __init__ with a path that does
+# not exist. Refusing here costs a build; the alternative costs a deployment.
+if [ -n "${JULIA_DEPOT_OVERRIDES_BUILD:-}" ] && [ -z "${JULIA_DEPOT_OVERRIDES_IMAGE:-}" ]; then
+    echo "FAILED: JULIA_DEPOT_OVERRIDES_BUILD is set without JULIA_DEPOT_OVERRIDES_IMAGE," >&2
+    echo "        which would ship this host's paths in the image. Set both." >&2
+    exit 1
+fi
 
 depot_prefix="${JULIA_DEPOT_IMAGE_PREFIX:-opt/julia-depot}"
 contents="${JULIA_DEPOT_CONTENTS:-artifacts}"
@@ -113,7 +127,14 @@ if [ "$n" -lt "$min_artifacts" ]; then
 fi
 
 if [ -n "${JULIA_DEPOT_OVERRIDES_BUILD:-}" ]; then
-    grep -oE '^[0-9a-f]{40}' "$JULIA_DEPOT_OVERRIDES_BUILD" | while read -r h; do
+    # Hash-keyed entries only: those are the ones Pkg honours at DOWNLOAD time, and so
+    # the only ones whose presence in artifacts/ means the override did not take. A TOML
+    # key may be bare or quoted, and both spellings have to be recognised, because an
+    # unrecognised one skips the check silently and the image then carries two copies of
+    # the artifact and loads the registry one. A file with no hash-keyed entries at all
+    # is legitimate (UUID and name overrides are resolved at load time), so a match is
+    # not required, only checked.
+    for h in $(sed -nE 's/^[[:space:]]*"?([0-9a-f]{40})"?[[:space:]]*=.*/\1/p' "$JULIA_DEPOT_OVERRIDES_BUILD"); do
         if [ -d "$fresh/artifacts/$h" ]; then
             echo "FAILED: artifact $h was downloaded despite the override" >&2
             exit 1
