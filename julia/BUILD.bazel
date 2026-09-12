@@ -1,0 +1,20 @@
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "image_depot.sh",
+    "instantiate.sh",
+    "sysimage.sh",
+    "artifact_paths.jl",
+])
+
+# The PackageCompiler environments, one per Julia minor version (sysimage/v1.12,
+# sysimage/v1.13, ...). sysimage.sh picks the one matching the running Julia when told
+# `auto`, so a consumer depends on this filegroup and never names a version. The
+# individual files are exported too, for a consumer that wants to pin one explicitly and
+# take dirname($(location ...)) as the project directory.
+filegroup(
+    name = "sysimage_envs",
+    srcs = glob(["sysimage/v*/Project.toml", "sysimage/v*/Manifest.toml"]),
+)
+
+exports_files(glob(["sysimage/v*/Project.toml", "sysimage/v*/Manifest.toml"]))

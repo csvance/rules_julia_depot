@@ -1,0 +1,6 @@
+# rules_julia_depot: a Julia environment pinned to a committed Manifest.toml, as Bazel
+# repositories and scripts. See README.md for the contract and the consumer interface.
+module(
+    name = "rules_julia_depot",
+    version = "0.1.0",
+)

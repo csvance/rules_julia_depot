@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Build a sysimage for a Manifest-pinned project with PackageCompiler.
+#
+# Usage: JULIA_SYSIMAGE_PACKAGES="Pkg1 Pkg2" sysimage.sh <project dir> <build project> <out.so>
+#
+#   <project dir>    the project whose packages are baked (a COPY; see below)
+#   <build project>  the PackageCompiler environment, or `auto` to use the one shipped
+#                    beside this script for the running Julia's minor version
+#                    (sysimage/v1.12, sysimage/v1.13, ...). Under Bazel, `auto` needs
+#                    @rules_julia_depot//julia:sysimage_envs among the action's srcs.
+#   <out.so>         sysimage path to write
+#
+# Environment:
+#   JULIA_BIN                    the julia to use (falls back to PATH for hand runs)
+#   JULIA_SYSIMAGE_PACKAGES      required, space-separated package names to bake
+#   JULIA_SYSIMAGE_CPU_TARGET    default "generic", so the image runs on any x86_64 host
+#
+# WHAT IT COSTS. Code baked into a sysimage cannot be revised. Use the sysimage when the
+# baked packages are fixed underneath you, and an ordinary Revise loop when they are not.
+#
+# WHAT IS NOT IN IT. No precompile trace: `create_sysimage` alone bakes the module code
+# and type system, which is the bulk of load time. Method specialisations from a
+# --trace-compile run are a further win and need a representative workload.
+#
+# PASS A COPY of the project directory when running under Bazel: srcs are staged as
+# symlinks to the real files, so anything that wrote to the project would corrupt the
+# actual Manifest.toml.
+set -euo pipefail
+
+PROJECT_DIR="$1"
+BUILD_PROJECT="$2"
+OUT="$3"
+: "${JULIA_SYSIMAGE_PACKAGES:?set JULIA_SYSIMAGE_PACKAGES to the space-separated packages to bake}"
+JULIA="${JULIA_BIN:-julia}"
+
+# The PackageCompiler environment must have been resolved under the SAME Julia minor as
+# the one building the sysimage: PackageCompiler's own compat and its precompile cache
+# are both keyed on it. `auto` selects by the running Julia; an explicit project is
+# checked the same way, so a stale pin fails here rather than deep inside PackageCompiler.
+minor="$("$JULIA" --startup-file=no -e 'print(VERSION.major, ".", VERSION.minor)')"
+if [ "$BUILD_PROJECT" = "auto" ]; then
+    here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    BUILD_PROJECT="$here/sysimage/v$minor"
+    if [ ! -f "$BUILD_PROJECT/Manifest.toml" ]; then
+        echo "no PackageCompiler environment for Julia $minor in $here/sysimage/" >&2
+        echo "available: $(ls -d "$here"/sysimage/v*/ 2>/dev/null | xargs -n1 basename | tr '\n' ' ')" >&2
+        echo "add one: cp sysimage/v<other>/Project.toml sysimage/v$minor/ && julia --project=sysimage/v$minor -e 'using Pkg; Pkg.instantiate()'" >&2
+        exit 2
+    fi
+fi
+want="$(sed -n 's/^julia_version = "\([0-9]*\.[0-9]*\)\..*/\1/p' "$BUILD_PROJECT/Manifest.toml")"
+if [ -n "$want" ] && [ "$want" != "$minor" ]; then
+    echo "the PackageCompiler environment $BUILD_PROJECT was resolved under Julia $want but this is Julia $minor" >&2
+    exit 2
+fi
+
+OUT_ABS="$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")"
+
+"$JULIA" --startup-file=no --project="$BUILD_PROJECT" -e '
+using PackageCompiler
+
+project, out = ARGS[1], ARGS[2]
+packages = Symbol.(split(ENV["JULIA_SYSIMAGE_PACKAGES"]))
+
+# Bake the named packages and, transitively, everything they depend on.
+create_sysimage(
+    packages;
+    project = project,
+    sysimage_path = out,
+    incremental = true,
+    cpu_target = get(ENV, "JULIA_SYSIMAGE_CPU_TARGET", "generic"),
+)
+' "$PROJECT_DIR" "$OUT_ABS"
