@@ -211,7 +211,9 @@ def version_mismatch_test(julia_repo, running_minor, running_patch, depot_repo, 
     """
     sh_test(
         name = "version_mismatch_{}_manifest_on_{}_test".format(_tag(manifest_minor), _tag(running_minor)),
-        size = "small",
+        # medium, not small: on a cold CI runner a fresh depot pays Pkg's first-load cost
+        # before the version check can fire, and that alone exceeded small's 60 s.
+        size = "medium",
         srcs = ["version_mismatch_test.sh"],
         args = [
             "$(rootpath @rules_julia_depot//julia:instantiate.sh)",
