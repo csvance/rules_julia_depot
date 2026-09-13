@@ -1,0 +1,50 @@
+# Testing
+
+The tests live in `e2e/`, a separate Bazel module that depends on this one through
+`local_path_override`. That is deliberate: what is being tested is the consumer
+interface, so the tests consume it the way a consumer does, through `bazel_dep`, the
+extension, and the repositories it produces.
+
+```bash
+cd e2e
+bazel test //...
+```
+
+Nothing else is needed. The Julia distributions are fetched and pinned by the module
+itself, so no Julia has to be installed to run the suite. It resolves against the public
+package server, pinned in `e2e/.bazelrc`, so a shell pointing `JULIA_PKG_SERVER` at a
+private mirror does not change what the tests fetch.
+
+Expect a few minutes cold, most of it downloading the two Julia distributions and
+building one sysimage per version; warm, the whole matrix takes about two and a half
+minutes.
+
+## The matrix
+
+Every Julia version in the matrix (currently 1.12.7 and 1.13.0) gets the same set of
+tests, tagged `julia<minor>` for the Julia they run, so a CI shard needs only that
+version's toolchain and depot:
+
+```bash
+bazel test $(bazel query "attr(tags, 'julia1_13', tests(//...))")
+```
+
+For each version: the toolchain produces a Julia of that version that can load its own
+stdlib; a depot over a manifest resolved under it stamps the right version, manifest hash
+and depot, and its `env.sh` carries no machine path; a hook runs before instantiate and
+sees its `hook_environ`; `image_depot.sh` ships artifacts and no packages in `artifacts`
+mode and both in `full`, honours the image prefix and the artifact floor, and never ships
+depot credentials; artifact overrides are honoured, and a broken one fails the build
+instead of producing an image with two copies of a library; and `sysimage.sh auto`
+selects that version's PackageCompiler environment, builds an image, and that image
+starts and loads what was baked into it. Across versions, a manifest resolved under one
+Julia is refused by the other in both directions, and a PackageCompiler environment
+pinned to the wrong minor is refused before any work starts.
+
+## Before pushing
+
+`tools/check_no_private_refs.sh` greps everything git would publish for internal
+hostnames, machine paths and credentials. The patterns are generic and live in
+`tools/private_ref_patterns.txt`; site-specific literals go in a file of your own named
+by `PRIVATE_REF_PATTERNS_EXTRA`, so that list never has to be published to be enforced.
+CI runs it, along with `buildifier -mode=check -lint=warn -r .`.
