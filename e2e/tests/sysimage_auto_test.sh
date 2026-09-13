@@ -39,7 +39,7 @@ out="$TEST_TMPDIR/sysimage.so"
 log="$TEST_TMPDIR/sysimage.log"
 
 env JULIA_BIN="$julia_bin" \
-    JULIA_DEPOT_PATH="$(overlay_depot "$src_depot")" \
+    JULIA_DEPOT_PATH="$(overlay_depot "$src_depot" "$julia_bin")" \
     JULIA_SYSIMAGE_PACKAGES="Crayons" \
     "$sysimage_sh" "$project" auto "$out" > "$log" 2>&1 ||
     fail "sysimage.sh auto failed under julia $want_minor:
@@ -59,7 +59,7 @@ size="$(stat -c %s "$out")"
 
 # The real assertion: start Julia on it and use the package that was baked in.
 loaded="$(
-    env JULIA_DEPOT_PATH="$(overlay_depot "$src_depot")" \
+    env JULIA_DEPOT_PATH="$(overlay_depot "$src_depot" "$julia_bin")" \
         "$julia_bin" --startup-file=no --sysimage "$out" --project="$project" \
         -e 'using Crayons; print(Crayons.Crayon(bold = true) isa Crayons.Crayon)'
 )" || fail "julia could not start on the sysimage it just built"

@@ -32,13 +32,28 @@ first_depot() {
     printf '%s\n' "${1%%:*}"
 }
 
-# A depot Julia may WRITE to, with the already-instantiated one behind it for reads. The
-# tests run sandboxed, where the real depot is visible but read-only, so anything Julia
-# decides to precompile on the way has to land somewhere else.
+# The two depots a Julia distribution ships inside itself (<prefix>/local/share/julia and
+# <prefix>/share/julia). The second holds the stdlib precompile caches: a depot path that
+# omits it makes `using Pkg` recompile Pkg serially, about 80 s on a fast machine and
+# several minutes on a CI runner, before anything else can happen.
+bundled_depots() {
+    local julia_bin="$1" prefix
+    prefix="$(cd "$(dirname "$(readlink -f "$julia_bin")")/.." && pwd)"
+    printf '%s:%s\n' "$prefix/local/share/julia" "$prefix/share/julia"
+}
+
+# A depot Julia may WRITE to, with the already-instantiated one behind it for reads and
+# the distribution's bundled depots after that. The tests run sandboxed, where the real
+# depot is visible but read-only, so anything Julia decides to precompile on the way has
+# to land somewhere else. Pass the julia binary so the bundled depots can be found.
 overlay_depot() {
-    local src="$1"
+    local src="$1" julia_bin="${2:-}"
     mkdir -p "$TEST_TMPDIR/overlay-depot"
-    printf '%s:%s\n' "$TEST_TMPDIR/overlay-depot" "$src"
+    if [ -n "$julia_bin" ]; then
+        printf '%s:%s:%s\n' "$TEST_TMPDIR/overlay-depot" "$src" "$(bundled_depots "$julia_bin")"
+    else
+        printf '%s:%s\n' "$TEST_TMPDIR/overlay-depot" "$src"
+    fi
 }
 
 # A writable copy of the project a Manifest runfile belongs to.

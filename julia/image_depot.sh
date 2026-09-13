@@ -107,7 +107,19 @@ if [ "$contents" = "full" ]; then
     instantiate="$instantiate; Pkg.Operations.download_source(Pkg.Types.Context())"
 fi
 
-env_args=(JULIA_DEPOT_PATH="$fresh" JULIA_PKG_PRECOMPILE_AUTO=0)
+# THE BUNDLED DEPOTS STAY ON THE PATH. Setting JULIA_DEPOT_PATH to the fresh directory
+# alone drops Julia's default entries, including <julia>/share/julia, where the
+# distribution ships the stdlib precompile caches. Without it, `using Pkg` recompiles Pkg
+# into the fresh depot, serially, before instantiate can start: 77 s on a fast machine,
+# 200 to 290 s on a CI runner, per invocation. Appending only the two bundled depots (NOT
+# a trailing colon, which would also pull in ~/.julia and let instantiate treat the
+# developer's artifacts as present) keeps the fresh depot the sole writable entry while
+# the caches shipped with Julia are found. The layer is unaffected: only artifacts/,
+# packages/ and compiled/ of the fresh depot leave here.
+julia_prefix="$(cd "$(dirname "$(readlink -f "$JULIA_BIN")")/.." && pwd)"
+depot_path="$fresh:$julia_prefix/local/share/julia:$julia_prefix/share/julia"
+
+env_args=(JULIA_DEPOT_PATH="$depot_path" JULIA_PKG_PRECOMPILE_AUTO=0)
 if [ -n "${JULIA_PKG_SERVER:-}" ]; then
     env_args+=(JULIA_PKG_SERVER="$JULIA_PKG_SERVER")
 fi

@@ -22,7 +22,7 @@ stamp_out="$TEST_TMPDIR/stamp.out"
 
 # A depot behind a writable overlay, only so Julia has somewhere to find an already
 # precompiled Pkg instead of building one for a test that fails three lines in.
-depot="$(overlay_depot "$(first_depot "$(stamp_value "$stamp" depot)")")"
+depot="$(overlay_depot "$(first_depot "$(stamp_value "$stamp" depot)")" "$julia_bin")"
 
 rc=0
 output="$(

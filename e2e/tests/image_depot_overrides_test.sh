@@ -34,7 +34,7 @@ src_depot="$(first_depot "$(stamp_value "$stamp" depot)")"
 
 # --- measure the hash to override -------------------------------------------------
 paths="$(
-    env JULIA_DEPOT_PATH="$(overlay_depot "$src_depot")" \
+    env JULIA_DEPOT_PATH="$(overlay_depot "$src_depot" "$julia_bin")" \
         "$julia_bin" --startup-file=no --project="$project" "$artifact_paths"
 )"
 [ -n "$paths" ] ||
