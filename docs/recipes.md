@@ -111,3 +111,27 @@ julia.depot(
     hook_environ = ["MY_REGISTRY_TOKEN"],
 )
 ```
+
+## A declared depot instead of the ambient one
+
+By default the depot rule instantiates into whatever `JULIA_DEPOT_PATH` names at fetch time, or
+Julia's default. When the environment should live somewhere specific, say per user on a local
+disk rather than in an NFS home, declare it:
+
+```python
+julia.depot(
+    name = "app_depot",
+    manifest = "//app:Manifest.toml",
+    julia = "@julia_dist//:bin/julia",
+    depot = "/cache/{USER}/myproject/julia",
+)
+```
+
+`{HOME}` and `{USER}` expand from the fetch environment and are registered as inputs, so another
+user refetches rather than reusing a depot conformed for someone else. The directory is created
+before the hook runs, and `env.sh` exports it with a trailing separator so Julia's bundled depots
+stay on the path. Consumers that want a writable depot in front of it (a per-sandbox scratch
+depot, say) prepend to `JULIA_DEPOT_PATH` after sourcing `env.sh`; Julia writes to the first entry
+and reads packages, artifacts and compiled caches from all of them. Note that Pkg reads
+package-server credentials (`servers/<host>/auth.toml`) from the first depot only, so a front
+depot needs its own copy when the environment resolves through a private server.

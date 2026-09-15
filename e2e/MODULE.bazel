@@ -61,6 +61,17 @@ julia.depot(
     manifest = "//projects/v1.12:Manifest.toml",
 )
 
+# The same project once more, into a DECLARED depot rather than the ambient one: the
+# `depot` attribute with a {HOME} placeholder. tests/declared_depot_test.sh checks that
+# env.sh exports the expanded path with the trailing separator and that the fetch landed
+# there.
+julia.depot(
+    name = "declared_depot_1_12",
+    depot = "{HOME}/.rules-julia-depot-e2e/declared",
+    julia = "@julia_1_12//:bin/julia",
+    manifest = "//projects/v1.12:Manifest.toml",
+)
+
 # --- Julia 1.13 -------------------------------------------------------------------
 julia.toolchain(
     name = "julia_1_13",
@@ -94,6 +105,7 @@ julia.depot(
 # Every repository the matrix declares, visible to //tests.
 use_repo(
     julia,
+    "declared_depot_1_12",
     "depot_1_12",
     "depot_1_13",
     "hook_depot_1_12",

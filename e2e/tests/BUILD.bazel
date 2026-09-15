@@ -4,6 +4,7 @@
 # these calls only have to agree with it. See tests/defs.bzl for what each call
 # declares and the top-level README for how to add a version.
 
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load(":defs.bzl", "julia_version_tests", "version_mismatch_test")
 
 package(default_testonly = True)
@@ -51,4 +52,23 @@ version_mismatch_test(
     project = "//projects/v1.12",
     running_minor = "1.13",
     running_patch = "1.13.0",
+)
+
+# The `depot` attribute: a declared depot with a {HOME} placeholder, instead of the ambient
+# JULIA_DEPOT_PATH. One version is enough; the attribute is version-independent.
+sh_test(
+    name = "declared_depot_1_12_test",
+    size = "small",
+    srcs = ["declared_depot_test.sh"],
+    args = [
+        "$(rootpath @declared_depot_1_12//:env.sh)",
+        "$(rootpath @declared_depot_1_12//:stamp.txt)",
+        ".rules-julia-depot-e2e/declared",
+    ],
+    data = [
+        "common.sh",
+        "@declared_depot_1_12//:env.sh",
+        "@declared_depot_1_12//:stamp.txt",
+    ],
+    tags = ["julia1_12"],
 )
