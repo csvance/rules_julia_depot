@@ -1,0 +1,15 @@
+# Directories Bazel must not descend into when resolving a target pattern like //...
+#
+# e2e is a SEPARATE Bazel module with its own MODULE.bazel, .bazelrc and .bazelversion: it is the
+# end-to-end workspace, built by running bazel inside it, and its packages are deliberately not
+# part of this module's target universe.
+#
+# Leaving it out breaks `bazel query //...` outright, and the reason is easy to miss. Running
+# bazel inside e2e/ leaves the usual bazel-bin / bazel-out / bazel-e2e convenience symlinks, which
+# point into the output base. .gitignore already covers them with `bazel-*`, but GIT-IGNORING IS
+# NOT BAZEL-IGNORING: the outer workspace still follows those symlinks, walks into the output
+# base, finds the external repositories checked out there and tries to load packages from them,
+# failing with an unresolvable repo such as `@rules_shellcheck`. The failure names an external
+# repo and a tests/runfiles path, neither of which appears in this source tree, so it reads like a
+# dependency problem rather than a directory-traversal one.
+e2e
